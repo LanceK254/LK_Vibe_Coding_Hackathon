@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EasyLedger</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.5/Babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/i18next@23.11.5/dist/umd/i18next.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/i18next-browser-languagedetector@7.1.0/dist/umd/i18nextBrowserLanguageDetector.min.js"></script>
+  <style>
+    canvas { max-width: 100%; height: auto; }
+    input[type="file"] { display: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // i18next initialization
+    i18next.use(i18nextBrowserLanguageDetector).init({
+      resources: {
+        en: {
+          translation: {
+            appTitle: "EasyLedger",
+            recordIncome: "Record Income",
+            recordExpense: "Record Expense",
+            uploadReceipt: "Upload Receipt",
+            syncPayments: "Sync Payments",
+            summary: "Summary",
+            amount: "Amount",
+            description: "Description",
+            date: "Date",
+            income: "Income",
+            expense: "Expense",
+            profitLoss: "Profit/Loss",
+            selectLanguage: "Select Language",
+            recordVoice: "Record with Voice",
+            processing: "Processing...",
+            success: "Transaction recorded!",
+            error: "Error occurred. Please try again.",
+          },
+        },
+        es: {
+          translation: {
+            appTitle: "EasyLedger",
+            recordIncome: "Registrar Ingreso",
+            recordExpense: "Registrar Gasto",
+            uploadReceipt: "Subir Recibo",
+            syncPayments: "Sincronizar Pagos",
+            summary: "Resumen",
+            amount: "Monto",
+            description: "Descripción",
+            date: "Fecha",
+            income: "Ingreso",
+            expense: "Gasto",
+            profitLoss: "Ganancia/Pérdida",
+            selectLanguage: "Seleccionar Idioma",
+            recordVoice: "Grabar con Voz",
+            processing: "Procesando...",
+            success: "¡Transacción registrada!",
+            error: "Ocurrió un error. Intenta de nuevo.",
+          },
+        },
+        sw: {
+          translation: {
+            appTitle: "EasyLedger",
+            recordIncome: "Rekodi Mapato",
+            recordExpense: "Rekodi Matumizi",
+            uploadReceipt: "Pakia Risiti",
+            syncPayments: "Sasanisha Malipo",
+            summary: "Muhtasari",
+            amount: "Kiasi",
+            description: "Maelezo",
+            date: "Tarehe",
+            income: "Mapato",
+            expense: "Matumizi",
+            profitLoss: "Faida/Hasara",
+            selectLanguage: "Chagua Lugha",
+            recordVoice: "Rekodi kwa Sauti",
+            processing: "Inachakata...",
+            success: "Miamala imerekodiwa!",
+            error: "Hitilafu imetokea. Jaribu tena.",
+          },
+        },
+      },
+      fallbackLng: "en",
+      detection: { order: ["navigator"] },
+    });
+
+    // Mock API for syncing and payment integration
+    const mockApi = {
+      syncTransactions: async (transactions) => {
+        console.log("Syncing transactions:", transactions);
+        return { status: "success" };
+      },
+      fetchPaymentTransactions: async () => {
+        return [
+          { amount: 100, description: "Mobile Payment - Sale", date: new Date().toISOString(), type: "income" },
+        ];
+      },
+    };
+
+    // Main App Component
+    function App() {
+      const [transactions, setTransactions] = useState([]);
+      const [amount, setAmount] = useState("");
+      const [description, setDescription] = useState("");
+      const [type, setType] = useState("income");
+      const [language, setLanguage] = useState(i18next.language);
+      const [status, setStatus] = useState("");
+      const [isRecording, setIsRecording] = useState(false);
+      const chartRef = useRef(null);
+      const recognitionRef = useRef(null);
+
+      // Load transactions from localStorage
+      useEffect(() => {
+        const saved = localStorage.getItem("transactions");
+        if (saved) setTransactions(JSON.parse(saved));
+      }, []);
+
+      // Save transactions to localStorage
+      useEffect(() => {
+        localStorage.setItem("transactions", JSON.stringify(transactions));
+      }, [transactions]);
+
+      // Initialize speech recognition
+      useEffect(() => {
+        if ("webkitSpeechRecognition" in window) {
+          recognitionRef.current = new webkitSpeechRecognition();
+          recognitionRef.current.lang = language;
+          recognitionRef.current.continuous = false;
+          recognitionRef.current.interimResults = false;
+          recognitionRef.current.onresult = (event) => {
+            const transcript = event.results[0][0].transcript.toLowerCase();
+            parseVoiceCommand(transcript);
+            setIsRecording(false);
+          };
+          recognitionRef.current.onerror = () => {
+            setStatus(i18next.t("error"));
+            setIsRecording(false);
+          };
+        }
+      }, [language]);
+
+      // Parse voice commands
+      const parseVoiceCommand = (transcript) => {
+        const amountMatch = transcript.match(/\d+/);
+        const isIncome = transcript.includes("income") || transcript.includes("mapato") || transcript.includes("ingreso");
+        const isExpense = transcript.includes("expense") || transcript.includes("matumizi") || transcript.includes("gasto");
+        const desc = transcript.replace(/\d+/, "").replace(/(income|expense|mapato|matumizi|ingreso|gasto)/i, "").trim();
+
+        if (amountMatch) {
+          const newTransaction = {
+            amount: parseFloat(amountMatch[0]),
+            description: desc || "Voice Recorded",
+            date: new Date().toISOString(),
+            type: isIncome ? "income" : isExpense ? "expense" : "income",
+          };
+          setTransactions([...transactions, newTransaction]);
+          setStatus(i18next.t("success"));
+        } else {
+          setStatus(i18next.t("error"));
+        }
+      };
+
+      // Handle voice recording
+      const handleVoiceRecord = () => {
+        if (recognitionRef.current) {
+          setIsRecording(true);
+          recognitionRef.current.start();
+        } else {
+          setStatus("Speech recognition not supported");
+        }
+      };
+
+      // Handle receipt upload
+      const handleReceiptUpload = async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        setStatus(i18next.t("processing"));
+        const { data: { text } } = await Tesseract.recognize(file, "eng");
+        const amountMatch = text.match(/\d+(\.\d{2})?/);
+        const dateMatch = text.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/);
+        const newTransaction = {
+          amount: amountMatch ? parseFloat(amountMatch[0]) : 0,
+          description: text.slice(0, 50) || "Receipt",
+          date: dateMatch ? new Date(dateMatch[0]).toISOString() : new Date().toISOString(),
+          type: "expense",
+        };
+        setTransactions([...transactions, newTransaction]);
+        setStatus(i18next.t("success"));
+      };
+
+      // Handle manual transaction
+      const handleAddTransaction = () => {
+        if (!amount || isNaN(amount)) {
+          setStatus(i18next.t("error"));
+          return;
+        }
+        const newTransaction = {
+          amount: parseFloat(amount),
+          description: description || "Manual Entry",
+          date: new Date().toISOString(),
+          type,
+        };
+        setTransactions([...transactions, newTransaction]);
+        setAmount("");
+        setDescription("");
+        setStatus(i18next.t("success"));
+      };
+
+      // Sync with mock backend
+      const handleSync = async () => {
+        setStatus(i18next.t("processing"));
+        try {
+          await mockApi.syncTransactions(transactions);
+          setStatus("Synced successfully");
+        } catch {
+          setStatus(i18next.t("error"));
+        }
+      };
+
+      // Fetch payment transactions
+      const handlePaymentSync = async () => {
+        setStatus(i18next.t("processing"));
+        try {
+          const paymentTransactions = await mockApi.fetchPaymentTransactions();
+          setTransactions([...transactions, ...paymentTransactions]);
+          setStatus(i18next.t("success"));
+        } catch {
+          setStatus(i18next.t("error"));
+        }
+      };
+
+      // Initialize chart
+      useEffect(() => {
+        const ctx = chartRef.current?.getContext("2d");
+        if (!ctx) return;
+
+        const monthlyData = transactions.reduce((acc, t) => {
+          const month = new Date(t.date).toLocaleString("default", { month: "short", year: "numeric" });
+          acc[month] = acc[month] || { income: 0, expense: 0 };
+          acc[month][t.type] += t.amount;
+          return acc;
+        }, {});
+
+        const labels = Object.keys(monthlyData);
+        const incomeData = labels.map((m) => monthlyData[m].income);
+        const expenseData = labels.map((m) => monthlyData[m].expense);
+
+        const chart = new Chart(ctx, {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              { label: i18next.t("income"), data: incomeData, backgroundColor: "rgba(75, 192, 192, 0.5)" },
+              { label: i18next.t("expense"), data: expenseData, backgroundColor: "rgba(255, 99, 132, 0.5)" },
+            ],
+          },
+          options: { scales: { y: { beginAtZero: true } } },
+        });
+
+        return () => chart.destroy();
+      }, [transactions]);
+
+      // Calculate profit/loss
+      const totalIncome = transactions.reduce((sum, t) => (t.type === "income" ? sum + t.amount : sum), 0);
+      const totalExpense = transactions.reduce((sum, t) => (t.type === "expense" ? sum + t.amount : sum), 0);
+      const profitLoss = totalIncome - totalExpense;
+
+      return (
+        <div className="container mx-auto p-4 max-w-3xl">
+          <h1 className="text-3xl font-bold mb-4">{i18next.t("appTitle")}</h1>
+          <div className="mb-4">
+            <label className="mr-2">{i18next.t("selectLanguage")}:</label>
+            <select
+              value={language}
+              onChange={(e) => {
+                setLanguage(e.target.value);
+                i18next.changeLanguage(e.target.value);
+              }}
+              className="border p-2 rounded"
+            >
+              <option value="en">English</option>
+              <option value="es">Español</option>
+              <option value="sw">Kiswahili</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div className="border p-4 rounded">
+              <h2 className="text-xl font-semibold mb-2">{i18next.t("recordIncome")}</h2>
+              <input
+                type="number"
+                placeholder={i18next.t("amount")}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="border p-2 mb-2 w-full rounded"
+              />
+              <input
+                type="text"
+                placeholder={i18next.t("description")}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="border p-2 mb-2 w-full rounded"
+              />
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+                className="border p-2 mb-2 w-full rounded"
+              >
+                <option value="income">{i18next.t("income")}</option>
+                <option value="expense">{i18next.t("expense")}</option>
+              </select>
+              <button
+                onClick={handleAddTransaction}
+                className="bg-blue-500 text-white p-2 rounded w-full"
+              >
+                {i18next.t(type === "income" ? "recordIncome" : "recordExpense")}
+              </button>
+              <button
+                onClick={handleVoiceRecord}
+                className={`mt-2 p-2 w-full rounded ${isRecording ? "bg-red-500" : "bg-green-500"} text-white`}
+              >
+                {isRecording ? i18next.t("processing") : i18next.t("recordVoice")}
+              </button>
+              <label className="block mt-2">
+                <span className="bg-yellow-500 text-white p-2 rounded w-full inline-block text-center cursor-pointer">
+                  {i18next.t("uploadReceipt")}
+                </span>
+                <input type="file" accept="image/*" onChange={handleReceiptUpload} />
+              </label>
+              <button
+                onClick={handlePaymentSync
+                }
+                className="mt-2 bg-purple-500 text-white p-2 rounded w-full"
+              >
+                {i18next.t("syncPayments")}
+              </button>
+            </div>
+            <div className="border p-4 rounded">
+              <h2 className="text-xl font-semibold mb-2">{i18next.t("summary")}</h2>
+              <p>
+                {i18next.t("income")}: ${totalIncome.toFixed(2)}
+              </p>
+              <p>
+                {i18next.t("expense")}: ${totalExpense.toFixed(2)}
+              </p>
+              <p className={profitLoss >= 0 ? "text-green-500" : "text-red-500"}>
+                {i18next.t("profitLoss")}: ${profitLoss.toFixed(2)}
+              </p>
+              <canvas ref={chartRef} className="mt-4"></canvas>
+            </div>
+          </div>
+          <button
+            onClick={handleSync}
+            className="bg-gray-500 text-white p-2 rounded w-full mb-4"
+          >
+            Sync Data
+          </button>
+          <p className="text-sm text-gray-600">{status}</p>
+          <div className="border p-4 rounded">
+            <h2 className="text-xl font-semibold mb-2">Transactions</h2>
+            <ul>
+              {transactions.map((t, index) => (
+                <li key={index} className="mb-2">
+                  {t.date.split("T")[0]}: {t.description} (${t.amount.toFixed(2)}, {t.type})
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      );
+    }
+
+    // Render the app
+    ReactDOM.render(<App />, document.getElementById("root"));
+  </script>
+</body>
+</html>
